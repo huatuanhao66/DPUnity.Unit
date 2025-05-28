@@ -91,5 +91,38 @@ namespace DPUnity.Unit.Utils
 
             return collection.DefaultToUnit;
         }
+
+        public static TValue ConvertValue<TUnit, TValue>(object value, UnitInfo<TUnit> fromInfo, UnitInfo<TUnit> toInfo)
+        {
+            var type = typeof(TValue);
+            TValue result;
+
+            if (type == typeof(decimal))
+            {
+                decimal decValue = (decimal)(object)value;
+                decimal valueInBase = decValue * (decimal)fromInfo.FactorToBase;
+                result = (TValue)(object)(valueInBase / (decimal)toInfo.FactorToBase);
+            }
+            else if (type == typeof(int))
+            {
+                int intValue = (int)(object)value;
+                int valueInBase = intValue * (int)fromInfo.FactorToBase;
+                result = (TValue)(object)(valueInBase / (int)toInfo.FactorToBase);
+            }
+            else if (type == typeof(float))
+            {
+                float floatValue = (float)(object)value;
+                float valueInBase = floatValue * (float)fromInfo.FactorToBase;
+                result = (TValue)(object)(valueInBase / (float)toInfo.FactorToBase);
+            }
+            else
+            {
+                double doubleValue = System.Convert.ToDouble(System.Convert.ChangeType(value, type));
+                double valueInBase = doubleValue * fromInfo.FactorToBase;
+                result = (TValue)(object)(valueInBase / toInfo.FactorToBase);
+            }
+
+            return result;
+        }
     }
 }

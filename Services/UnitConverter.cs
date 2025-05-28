@@ -13,37 +13,28 @@ namespace DPUnity.Unit.Services
     {
         private readonly object _defaultFromUnit = null;
         private readonly object _defaultToUnit = null;
-        private readonly List<(Enum from, Enum to)> _defaultUnits = new List<(Enum from, Enum to)>();
+        private readonly Dictionary<Type, (Enum from, Enum to)> _defaultUnits = new Dictionary<Type, (Enum from, Enum to)>();
 
-        public UnitConverter(List<(Enum from, Enum to)> defaultUnits)
+        public UnitConverter(IEnumerable<(Enum from, Enum to)> defaultUnits)
         {
             defaultUnits = defaultUnits ?? throw new ArgumentNullException(nameof(defaultUnits));
 
-            var enumTypeCounts = new Dictionary<Type, int>();
-
-            foreach (var defaultUnit in defaultUnits)
+            foreach (var (from, to) in defaultUnits)
             {
-                if (defaultUnit.from != null && defaultUnit.to != null)
-                {
-                    if (defaultUnit.from.GetType() != defaultUnit.from.GetType())
-                        throw new InvalidOperationException("Unit types mismatch.");
+                if (from == null || to == null)
+                    continue;
 
-                    var enumType = defaultUnit.from.GetType();
-                    if (!enumTypeCounts.ContainsKey(enumType))
-                        enumTypeCounts[enumType] = 1;
-                    else
-                        enumTypeCounts[enumType]++;
+                var fromType = from.GetType();
+                var toType = to.GetType();
 
-                }
+                if (fromType != toType)
+                    throw new InvalidOperationException("Mismatch between 'from' and 'to' enum types.");
+
+                if (_defaultUnits.ContainsKey(fromType))
+                    throw new InvalidOperationException($"Duplicate unit type: {fromType.Name}");
+
+                _defaultUnits[fromType] = (from, to);
             }
-
-            var duplicates = enumTypeCounts.Where(kvp => kvp.Value > 1).ToList();
-            if (duplicates.Any())
-            {
-                throw new InvalidOperationException($"Duplicate unit types found in list");
-            }
-
-            _defaultUnits = defaultUnits.ToList();
         }
 
         public UnitConverter((Enum from, Enum to) defaultUnit)
@@ -62,7 +53,7 @@ namespace DPUnity.Unit.Services
         {
         }
 
-        public double Convert<TUnit>(TUnit fromUnit, TUnit toUnit, double value) where TUnit : Enum
+        public TValue Convert<TUnit, TValue>(TUnit fromUnit, TUnit toUnit, TValue value) where TUnit : Enum
         {
             try
             {
@@ -71,13 +62,78 @@ namespace DPUnity.Unit.Services
                 if (fromInfo == null || toInfo == null)
                     throw new ArgumentException("Invalid unit.");
 
-                double valueInBase = value * fromInfo.FactorToBase;
-                return valueInBase / toInfo.FactorToBase;
+                TValue result = UnitHelper.ConvertValue<TUnit, TValue>(value, fromInfo, toInfo);
+
+                return result;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
-                throw;
+                throw new Exception($"Error: {ex.Message}");
+            }
+        }
+
+        public TValue Convert<TUnit, TValue>(TValue value) where TUnit : Enum
+        {
+            try
+            {
+                TUnit defaultFromUnit, defaultToUnit;
+
+                //Check list of default units
+                if (_defaultUnits.TryGetValue(typeof(TUnit), out var match))
+                {
+                    defaultFromUnit = match.from is TUnit from ? from : UnitHelper.GetDefaultFromUnit<TUnit>();
+                    defaultToUnit = match.to is TUnit to ? to : UnitHelper.GetDefaultToUnit<TUnit>();
+                }
+                else //check default from and default to
+                {
+                    defaultFromUnit = _defaultFromUnit is TUnit from ? from : UnitHelper.GetDefaultFromUnit<TUnit>();
+                    defaultToUnit = _defaultToUnit is TUnit to ? to : UnitHelper.GetDefaultToUnit<TUnit>();
+                }
+
+                var toInfo = UnitHelper.GetUnitInfo(defaultToUnit, defaultToUnit);
+                var fromInfo = UnitHelper.GetUnitInfo(defaultFromUnit, defaultFromUnit);
+                if (toInfo == null || fromInfo == null)
+                    throw new ArgumentException("Invalid unit.");
+
+                TValue result = UnitHelper.ConvertValue<TUnit, TValue>(value, fromInfo, toInfo);
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
+                throw new Exception($"Error: {ex.Message}");
+            }
+        }
+
+        public object Convert<TUnit>(object value) where TUnit : Enum
+        {
+            try
+            {
+                if (value == null)
+                    throw new ArgumentNullException(nameof(value));
+                else if (value is double doubleValue)
+                    return (object)Convert<TUnit>(doubleValue);
+                else if (value is decimal decValue)
+                    return (object)Convert<TUnit>(decValue);
+                else if (value is float floatValue)
+                    return (object)Convert<TUnit>(floatValue);
+                else if (value is int intValue)
+                {
+                    double result = Convert<TUnit>((double)intValue);
+                    if (result % 1 == 0)
+                        return (object)(int)result;
+                    else
+                        return (object)result;
+                }
+
+                return value;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
+                throw new Exception($"Error: {ex.Message}");
             }
         }
 
@@ -85,48 +141,51 @@ namespace DPUnity.Unit.Services
         {
             try
             {
-                TUnit defaultFromUnit, defaultToUnit;
-
-                if (_defaultUnits.Any()) //Check list Unit Default
-                {
-                    var match = _defaultUnits.FirstOrDefault(p => p.from.GetType() == typeof(TUnit));
-                    if (match.from == null)
-                        defaultFromUnit = UnitHelper.GetDefaultFromUnit<TUnit>();
-                    else
-                        defaultFromUnit = (TUnit)match.from;
-
-                    match = _defaultUnits.FirstOrDefault(p => p.to.GetType() == typeof(TUnit));
-                    if (match.to == null)
-                        defaultToUnit = UnitHelper.GetDefaultToUnit<TUnit>();
-                    else
-                        defaultToUnit = (TUnit)match.to;
-                }
-                else //check default from and default to
-                {
-                    if (_defaultFromUnit == null || !(_defaultFromUnit is TUnit))
-                        defaultFromUnit = UnitHelper.GetDefaultFromUnit<TUnit>();
-                    else
-                        defaultFromUnit = (TUnit)_defaultFromUnit;
-
-                    if (_defaultToUnit == null || !(_defaultFromUnit is TUnit))
-                        defaultToUnit = UnitHelper.GetDefaultToUnit<TUnit>();
-                    else
-                        defaultToUnit = (TUnit)_defaultToUnit;
-                }
-
-                var toInfo = UnitHelper.GetUnitInfo(defaultToUnit, defaultToUnit);
-                var defaultInfo = UnitHelper.GetUnitInfo(defaultFromUnit, defaultFromUnit);
-                if (toInfo == null)
-                    throw new ArgumentException("Invalid unit.");
-
-                double valueInBase = value * defaultInfo.FactorToBase;
-
-                return valueInBase / toInfo.FactorToBase;
+                return Convert<TUnit, double> (value); ;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
-                throw;
+                throw new Exception($"Error: {ex.Message}");
+            }
+        }
+
+        public decimal Convert<TUnit>(decimal value) where TUnit : Enum
+        {
+            try
+            {
+                return Convert<TUnit, decimal>(value);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
+                throw new Exception($"Error: {ex.Message}");
+            }
+        }
+
+        public int Convert<TUnit>(int value) where TUnit : Enum
+        {
+            try
+            {
+                return Convert<TUnit, int>(value);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
+                throw new Exception($"Error: {ex.Message}");
+            }
+        }
+
+        public float Convert<TUnit>(float value) where TUnit : Enum
+        {
+            try
+            {
+                return Convert<TUnit, float>(value);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UnitConverter] Error: {ex.Message}");
+                throw new Exception($"Error: {ex.Message}");
             }
         }
     }
